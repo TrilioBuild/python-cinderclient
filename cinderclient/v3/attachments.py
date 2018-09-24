@@ -26,18 +26,24 @@ class VolumeAttachment(base.Resource):
 class VolumeAttachmentManager(base.ManagerWithFind):
     resource_class = VolumeAttachment
 
-    def create(self, volume_id, connector, instance_id):
+    @api_versions.wraps('3.27')
+    def create(self, volume_id, connector, instance_id, mode='null'):
         """Create a attachment for specified volume."""
         body = {'attachment': {'volume_uuid': volume_id,
                                'instance_uuid': instance_id,
                                'connector': connector}}
+        if self.api_version >= api_versions.APIVersion("3.54"):
+            if mode and mode != 'null':
+                body['attachment']['mode'] = mode
         retval = self._create('/attachments', body, 'attachment')
         return retval.to_dict()
 
+    @api_versions.wraps('3.27')
     def delete(self, attachment):
         """Delete an attachment by ID."""
         return self._delete("/attachments/%s" % base.getid(attachment))
 
+    @api_versions.wraps('3.27')
     def list(self, detailed=False, search_opts=None, marker=None, limit=None,
              sort_key=None, sort_dir=None, sort=None):
         """List all attachments."""
@@ -51,6 +57,7 @@ class VolumeAttachmentManager(base.ManagerWithFind):
                                    sort_dir=sort_dir, sort=sort)
         return self._list(url, resource_type, limit=limit)
 
+    @api_versions.wraps('3.27')
     def show(self, id):
         """Attachment show.
 
@@ -61,6 +68,7 @@ class VolumeAttachmentManager(base.ManagerWithFind):
         return self.resource_class(self, body['attachment'], loaded=True,
                                    resp=resp)
 
+    @api_versions.wraps('3.27')
     def update(self, id, connector):
         """Attachment update."""
         body = {'attachment': {'connector': connector}}

@@ -145,6 +145,7 @@ class FakeHTTPClient(fake_v2.FakeHTTPClient):
                 'state': 'up',
                 'updated_at': datetime(2012, 10, 29, 13, 42, 2),
                 'cluster': 'cluster1',
+                'backend_state': 'up',
             },
             {
                 'id': 2,
@@ -155,6 +156,7 @@ class FakeHTTPClient(fake_v2.FakeHTTPClient):
                 'state': 'down',
                 'updated_at': datetime(2012, 9, 18, 8, 3, 38),
                 'cluster': 'cluster1',
+                'backend_state': 'down',
             },
             {
                 'id': 3,
@@ -174,6 +176,11 @@ class FakeHTTPClient(fake_v2.FakeHTTPClient):
         if not self.api_version.matches('3.7'):
             for svc in services:
                 del svc['cluster']
+
+        if not self.api_version.matches('3.49'):
+            for svc in services:
+                if svc['binary'] == 'cinder-volume':
+                    del svc['backend_state']
         return (200, {}, {'services': services})
 
     #
@@ -606,11 +613,61 @@ class FakeHTTPClient(fake_v2.FakeHTTPClient):
                                             }
                          }
 
+    def post_workers_cleanup(self, **kw):
+        response = {
+            'cleaning': [{'id': '1', 'cluster_name': 'cluster1',
+                          'host': 'host1', 'binary': 'binary'},
+                         {'id': '3', 'cluster_name': 'cluster1',
+                          'host': 'host3', 'binary': 'binary'}],
+            'unavailable': [{'id': '2', 'cluster_name': 'cluster2',
+                             'host': 'host2', 'binary': 'binary'}],
+        }
+        return 200, {}, response
+
     #
     # resource filters
     #
     def get_resource_filters(self, **kw):
         return 200, {}, {'resource_filters': []}
+
+    def get_volume_transfers_detail(self, **kw):
+        base_uri = 'http://localhost:8776'
+        tenant_id = '0fa851f6668144cf9cd8c8419c1646c1'
+        transfer1 = '5678'
+        transfer2 = 'f625ec3e-13dd-4498-a22a-50afd534cc41'
+        return (200, {},
+                {'transfers': [
+                    fake_v2._stub_transfer_full(transfer1, base_uri,
+                                                tenant_id),
+                    fake_v2._stub_transfer_full(transfer2, base_uri,
+                                                tenant_id)]})
+
+    def get_volume_transfers_5678(self, **kw):
+        base_uri = 'http://localhost:8776'
+        tenant_id = '0fa851f6668144cf9cd8c8419c1646c1'
+        transfer1 = '5678'
+        return (200, {},
+                {'transfer':
+                 fake_v2._stub_transfer_full(transfer1, base_uri, tenant_id)})
+
+    def delete_volume_transfers_5678(self, **kw):
+        return (202, {}, None)
+
+    def post_volume_transfers(self, **kw):
+        base_uri = 'http://localhost:8776'
+        tenant_id = '0fa851f6668144cf9cd8c8419c1646c1'
+        transfer1 = '5678'
+        return (202, {},
+                {'transfer': fake_v2._stub_transfer(transfer1, base_uri,
+                                                    tenant_id)})
+
+    def post_volume_transfers_5678_accept(self, **kw):
+        base_uri = 'http://localhost:8776'
+        tenant_id = '0fa851f6668144cf9cd8c8419c1646c1'
+        transfer1 = '5678'
+        return (200, {},
+                {'transfer': fake_v2._stub_transfer(transfer1, base_uri,
+                                                    tenant_id)})
 
 
 def fake_request_get():

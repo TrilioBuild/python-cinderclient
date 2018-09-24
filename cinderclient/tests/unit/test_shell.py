@@ -16,9 +16,11 @@ import re
 import sys
 import unittest
 
+import ddt
 import fixtures
 import keystoneauth1.exceptions as ks_exc
 from keystoneauth1.exceptions import DiscoveryFailure
+from keystoneauth1.identity.generic.password import Password as ks_password
 from keystoneauth1 import session
 import mock
 import requests_mock
@@ -35,6 +37,7 @@ from cinderclient.tests.unit.fixture_data import keystone_client
 from cinderclient.tests.unit import utils
 
 
+@ddt.ddt
 class ShellTest(utils.TestCase):
 
     FAKE_ENV = {
@@ -92,6 +95,21 @@ class ShellTest(utils.TestCase):
         args, __ = _shell.get_base_parser().parse_known_args([])
         self.assertEqual('noauth', args.os_auth_type)
 
+    @mock.patch.object(cinderclient.shell.OpenStackCinderShell,
+                       '_get_keystone_session')
+    @mock.patch.object(cinderclient.client.SessionClient, 'authenticate',
+                       side_effect=RuntimeError())
+    def test_password_auth_type(self, mock_authenticate,
+                                mock_get_session):
+        self.make_env(include={'OS_AUTH_TYPE': 'password'})
+        _shell = shell.OpenStackCinderShell()
+
+        # We crash the command after Client instantiation because this test
+        # focuses only keystoneauth1 indentity cli opts parsing.
+        self.assertRaises(RuntimeError, _shell.main, ['list'])
+        self.assertIsInstance(_shell.cs.client.session.auth,
+                              ks_password)
+
     def test_help_unknown_command(self):
         self.assertRaises(exceptions.CommandError, self.shell, 'help foofoo')
 
@@ -112,6 +130,15 @@ class ShellTest(utils.TestCase):
             '.*?(?m)^Lists all volumes.',
         ]
         help_text = self.shell('help list')
+        for r in required:
+            self.assertThat(help_text,
+                            matchers.MatchesRegex(r, re.DOTALL | re.MULTILINE))
+
+    @ddt.data('backup-create --help', '--help backup-create')
+    def test_dash_dash_help_on_subcommand(self, cmd):
+        required = ['.*?^Creates a volume backup.']
+        help_text = self.shell(cmd)
+
         for r in required:
             self.assertThat(help_text,
                             matchers.MatchesRegex(r, re.DOTALL | re.MULTILINE))

@@ -17,4 +17,20 @@
 Volume transfer interface (v3 extension).
 """
 
-from cinderclient.v2.volume_transfers import *  # flake8: noqa
+from cinderclient.v2 import volume_transfers
+
+
+class VolumeTransferManager(volume_transfers.VolumeTransferManager):
+    def create(self, volume_id, name=None, no_snapshots=False):
+        """Creates a volume transfer.
+
+        :param volume_id: The ID of the volume to transfer.
+        :param name: The name of the transfer.
+        :param no_snapshots: Transfer volumes without snapshots.
+        :rtype: :class:`VolumeTransfer`
+        """
+        body = {'transfer': {'volume_id': volume_id,
+                             'name': name}}
+        if self.api_version.matches('3.55'):
+            body['transfer']['no_snapshots'] = no_snapshots
+        return self._create('/volume-transfers', body, 'transfer')

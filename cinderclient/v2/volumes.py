@@ -15,6 +15,8 @@
 
 """Volume interface (v2 extension)."""
 
+import warnings
+
 from cinderclient.apiclient import base as common_base
 from cinderclient import base
 
@@ -240,7 +242,7 @@ class VolumeManager(base.ManagerWithFind):
                volume_type=None, user_id=None,
                project_id=None, availability_zone=None,
                metadata=None, imageRef=None, scheduler_hints=None,
-               source_replica=None, multiattach=False):
+               multiattach=False):
         """Create a volume.
 
         :param size: Size of volume in GB
@@ -249,17 +251,16 @@ class VolumeManager(base.ManagerWithFind):
         :param name: Name of the volume
         :param description: Description of the volume
         :param volume_type: Type of volume
-        :param user_id: User id derived from context
-        :param project_id: Project id derived from context
+        :param user_id: User id derived from context (IGNORED)
+        :param project_id: Project id derived from context (IGNORED)
         :param availability_zone: Availability Zone to use
         :param metadata: Optional metadata to set on volume creation
         :param imageRef: reference to an image stored in glance
         :param source_volid: ID of source volume to clone from
-        :param source_replica: ID of source volume to clone replica
         :param scheduler_hints: (optional extension) arbitrary key-value pairs
                             specified by the client to help boot an instance
         :param multiattach: Allow the volume to be attached to more than
-                            one instance
+                            one instance (deprecated)
         :rtype: :class:`Volume`
         """
         if metadata is None:
@@ -267,21 +268,23 @@ class VolumeManager(base.ManagerWithFind):
         else:
             volume_metadata = metadata
 
+        if multiattach:
+            warnings.warn('The ``multiattach`` volume create flag is '
+                          'deprecated and will be removed in a future '
+                          'release. Multiattach capability is now controlled '
+                          'using volume type extra specs.',
+                          DeprecationWarning)
+
         body = {'volume': {'size': size,
                            'consistencygroup_id': consistencygroup_id,
                            'snapshot_id': snapshot_id,
                            'name': name,
                            'description': description,
                            'volume_type': volume_type,
-                           'user_id': user_id,
-                           'project_id': project_id,
                            'availability_zone': availability_zone,
-                           'status': "creating",
-                           'attach_status': "detached",
                            'metadata': volume_metadata,
                            'imageRef': imageRef,
                            'source_volid': source_volid,
-                           'source_replica': source_replica,
                            'multiattach': multiattach,
                            }}
 

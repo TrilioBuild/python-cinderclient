@@ -44,6 +44,7 @@ class GroupSnapshotManager(base.ManagerWithFind):
     """Manage :class:`GroupSnapshot` resources."""
     resource_class = GroupSnapshot
 
+    @api_versions.wraps('3.14')
     def create(self, group_id, name=None, description=None,
                user_id=None,
                project_id=None):
@@ -62,14 +63,12 @@ class GroupSnapshotManager(base.ManagerWithFind):
                 'group_id': group_id,
                 'name': name,
                 'description': description,
-                'user_id': user_id,
-                'project_id': project_id,
-                'status': "creating",
             }
         }
 
         return self._create('/group_snapshots', body, 'group_snapshot')
 
+    @api_versions.wraps('3.14')
     def get(self, group_snapshot_id):
         """Get a group snapshot.
 
@@ -89,6 +88,7 @@ class GroupSnapshotManager(base.ManagerWithFind):
         body = {'status': state} if state else {}
         return self._action('reset_status', group_snapshot, body)
 
+    @api_versions.wraps('3.14')
     def list(self, detailed=True, search_opts=None):
         """Lists all group snapshots.
 
@@ -105,6 +105,7 @@ class GroupSnapshotManager(base.ManagerWithFind):
         return self._list("/group_snapshots%s%s" % (detail, query_string),
                           "group_snapshots")
 
+    @api_versions.wraps('3.14')
     def delete(self, group_snapshot):
         """Delete a group_snapshot.
 
@@ -112,6 +113,7 @@ class GroupSnapshotManager(base.ManagerWithFind):
         """
         return self._delete("/group_snapshots/%s" % base.getid(group_snapshot))
 
+    @api_versions.wraps('3.14')
     def update(self, group_snapshot, **kwargs):
         """Update the name or description for a group_snapshot.
 

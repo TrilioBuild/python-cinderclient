@@ -52,6 +52,27 @@ def do_list_filters(cs, args):
         shell_utils.print_resource_filter_list(filters)
 
 
+@utils.arg('--filters',
+           type=six.text_type,
+           nargs='*',
+           start_version='3.52',
+           metavar='<key=value>',
+           default=None,
+           help="Filter key and value pairs. Admin only.")
+def do_type_list(cs, args):
+    """Lists available 'volume types'.
+
+    (Only admin and tenant users will see private types)
+    """
+    # pylint: disable=function-redefined
+    search_opts = {}
+    # Update search option with `filters`
+    if hasattr(args, 'filters') and args.filters is not None:
+        search_opts.update(shell_utils.extract_filters(args.filters))
+    vtypes = cs.volume_types.list(search_opts=search_opts)
+    shell_utils.print_volume_type_list(vtypes)
+
+
 @utils.arg('--all-tenants',
            metavar='<all_tenants>',
            nargs='?',
@@ -107,10 +128,21 @@ def do_list_filters(cs, args):
            help="Filter key and value pairs. Please use 'cinder list-filters' "
                 "to check enabled filters from server. Use 'key~=value' for "
                 "inexact filtering if the key supports. Default=None.")
+@utils.arg('--with-count',
+           type=bool,
+           default=False,
+           const=True,
+           nargs='?',
+           start_version='3.45',
+           metavar='<True|False>',
+           help="Show total number of backup entities. This is useful when "
+                "pagination is applied in the request.")
 def do_backup_list(cs, args):
     """Lists all backups."""
     # pylint: disable=function-redefined
 
+    show_count = True if hasattr(
+        args, 'with_count') and args.with_count else False
     search_opts = {
         'all_tenants': args.all_tenants,
         'name': args.name,
@@ -122,10 +154,18 @@ def do_backup_list(cs, args):
     if hasattr(args, 'filters') and args.filters is not None:
         search_opts.update(shell_utils.extract_filters(args.filters))
 
-    backups = cs.backups.list(search_opts=search_opts,
-                              marker=args.marker,
-                              limit=args.limit,
-                              sort=args.sort)
+    total_count = 0
+    if show_count:
+        search_opts['with_count'] = args.with_count
+        backups, total_count = cs.backups.list(search_opts=search_opts,
+                                               marker=args.marker,
+                                               limit=args.limit,
+                                               sort=args.sort)
+    else:
+        backups = cs.backups.list(search_opts=search_opts,
+                                  marker=args.marker,
+                                  limit=args.limit,
+                                  sort=args.sort)
     shell_utils.translate_volume_snapshot_keys(backups)
     columns = ['ID', 'Volume ID', 'Status', 'Name', 'Size', 'Object Count',
                'Container']
@@ -134,6 +174,8 @@ def do_backup_list(cs, args):
     else:
         sortby_index = 0
     utils.print_list(backups, columns, sortby_index=sortby_index)
+    if show_count:
+        print("Backup in total: %s" % total_count)
 
 
 @utils.arg('--detail',
@@ -282,13 +324,23 @@ RESET_STATE_RESOURCES = {'volume': utils.find_volume,
            help="Filter key and value pairs. Please use 'cinder list-filters' "
                 "to check enabled filters from server. Use 'key~=value' "
                 "for inexact filtering if the key supports. Default=None.")
+@utils.arg('--with-count',
+           type=bool,
+           default=False,
+           const=True,
+           nargs='?',
+           start_version='3.45',
+           metavar='<True|False>',
+           help="Show total number of volume entities. This is useful when "
+                "pagination is applied in the request.")
 def do_list(cs, args):
     """Lists all volumes."""
     # pylint: disable=function-redefined
     # NOTE(thingee): Backwards-compatibility with v1 args
     if args.display_name is not None:
         args.name = args.display_name
-
+    show_count = True if hasattr(
+        args, 'with_count') and args.with_count else False
     all_tenants = 1 if args.tenant else \
         int(os.environ.get("ALL_TENANTS", args.all_tenants))
     search_opts = {
@@ -323,9 +375,17 @@ def do_list(cs, args):
             'The --sort_key and --sort_dir arguments are deprecated and are '
             'not supported with --sort.')
 
-    volumes = cs.volumes.list(search_opts=search_opts, marker=args.marker,
-                              limit=args.limit, sort_key=args.sort_key,
-                              sort_dir=args.sort_dir, sort=args.sort)
+    total_count = 0
+    if show_count:
+        search_opts['with_count'] = args.with_count
+        volumes, total_count = cs.volumes.list(
+            search_opts=search_opts, marker=args.marker,
+            limit=args.limit, sort_key=args.sort_key,
+            sort_dir=args.sort_dir, sort=args.sort)
+    else:
+        volumes = cs.volumes.list(search_opts=search_opts, marker=args.marker,
+                                  limit=args.limit, sort_key=args.sort_key,
+                                  sort_dir=args.sort_dir, sort=args.sort)
     shell_utils.translate_volume_keys(volumes)
 
     # Create a list of servers to which the volume is attached
@@ -353,6 +413,8 @@ def do_list(cs, args):
         sortby_index = 0
     utils.print_list(volumes, key_list, exclude_unavailable=True,
                      sortby_index=sortby_index)
+    if show_count:
+        print("Volume in total: %s" % total_count)
 
 
 @utils.arg('entity', metavar='<entity>', nargs='+',
@@ -419,7 +481,7 @@ def do_reset_state(cs, args):
            type=int,
            action=CheckSizeArgForCreate,
            help='Size of volume, in GiBs. (Required unless '
-                'snapshot-id/source-volid is specified).')
+                'snapshot-id/source-volid/backup-id is specified).')
 @utils.arg('--consisgroup-id',
            metavar='<consistencygroup-id>',
            default=None,
@@ -443,10 +505,6 @@ def do_reset_state(cs, args):
            help='Creates volume from volume ID. Default=None.')
 @utils.arg('--source_volid',
            help=argparse.SUPPRESS)
-@utils.arg('--source-replica',
-           metavar='<source-replica>',
-           default=None,
-           help='Creates volume from replicated volume ID. Default=None.')
 @utils.arg('--image-id',
            metavar='<image-id>',
            default=None,
@@ -457,6 +515,11 @@ def do_reset_state(cs, args):
            metavar='<image>',
            default=None,
            help='Creates a volume from image (ID or name). Default=None.')
+@utils.arg('--backup-id',
+           metavar='<backup-id>',
+           default=None,
+           start_version='3.47',
+           help='Creates a volume from backup ID. Default=None.')
 @utils.arg('--image_ref',
            help=argparse.SUPPRESS)
 @utils.arg('--name',
@@ -501,7 +564,7 @@ def do_reset_state(cs, args):
 @utils.arg('--allow-multiattach',
            dest='multiattach',
            action="store_true",
-           help=('Allow volume to be attached more than once.'
+           help=('Allow volume to be attached more than once. (DEPRECATED)'
                  ' Default=False'),
            default=False)
 @utils.arg('--poll',
@@ -544,6 +607,8 @@ def do_create(cs, args):
     except AttributeError:
         group_id = None
 
+    backup_id = args.backup_id if hasattr(args, 'backup_id') else None
+
     volume = cs.volumes.create(args.size,
                                args.consisgroup_id,
                                group_id,
@@ -556,8 +621,8 @@ def do_create(cs, args):
                                imageRef=image_ref,
                                metadata=volume_metadata,
                                scheduler_hints=hints,
-                               source_replica=args.source_replica,
-                               multiattach=args.multiattach)
+                               multiattach=args.multiattach,
+                               backup_id=backup_id)
 
     info = dict()
     volume = cs.volumes.get(volume.id)
@@ -858,7 +923,55 @@ def do_upload_to_image(cs, args):
                                    args.disk_format))
 
 
-@api_versions.wraps('3.9', '3.43')
+@utils.arg('volume', metavar='<volume>', help='ID of volume to migrate.')
+# NOTE(geguileo): host is positional but optional in order to maintain backward
+# compatibility even with mutually exclusive arguments.  If version is < 3.16
+# then only host positional argument will be possible, and since the
+# exclusive_arg group has required=True it will be required even if it's
+# optional.
+@utils.exclusive_arg('destination', 'host', required=True, nargs='?',
+                     metavar='<host>', help='Destination host. Takes the '
+                     'form: host@backend-name#pool')
+@utils.exclusive_arg('destination', '--cluster', required=True,
+                     help='Destination cluster. Takes the form: '
+                     'cluster@backend-name#pool',
+                     start_version='3.16')
+@utils.arg('--force-host-copy', metavar='<True|False>',
+           choices=['True', 'False'],
+           required=False,
+           const=True,
+           nargs='?',
+           default=False,
+           help='Enables or disables generic host-based '
+           'force-migration, which bypasses driver '
+           'optimizations. Default=False.')
+@utils.arg('--lock-volume', metavar='<True|False>',
+           choices=['True', 'False'],
+           required=False,
+           const=True,
+           nargs='?',
+           default=False,
+           help='Enables or disables the termination of volume migration '
+           'caused by other commands. This option applies to the '
+           'available volume. True means it locks the volume '
+           'state and does not allow the migration to be aborted. The '
+           'volume status will be in maintenance during the '
+           'migration. False means it allows the volume migration '
+           'to be aborted. The volume status is still in the original '
+           'status. Default=False.')
+def do_migrate(cs, args):
+    """Migrates volume to a new host."""
+    volume = utils.find_volume(cs, args.volume)
+    try:
+        volume.migrate_volume(args.host, args.force_host_copy,
+                              args.lock_volume, getattr(args, 'cluster', None))
+        print("Request to migrate volume %s has been accepted." % (volume.id))
+    except Exception as e:
+        print("Migration for volume %s failed: %s." % (volume.id,
+                                                       six.text_type(e)))
+
+
+@api_versions.wraps('3.9')
 @utils.arg('backup', metavar='<backup>',
            help='Name or ID of backup to rename.')
 @utils.arg('--name', nargs='?', metavar='<name>',
@@ -872,7 +985,7 @@ def do_upload_to_image(cs, args):
            help='Metadata key and value pairs. Default=None.',
            start_version='3.43')
 def do_backup_update(cs, args):
-    """Renames a backup."""
+    """Updates a backup."""
     kwargs = {}
 
     if args.name is not None:
@@ -883,10 +996,10 @@ def do_backup_update(cs, args):
 
     if cs.api_version >= api_versions.APIVersion("3.43"):
         if args.metadata is not None:
-            kwargs['metadata'] = args.metadata
+            kwargs['metadata'] = shell_utils.extract_metadata(args)
 
     if not kwargs:
-        msg = 'Must supply either name or description.'
+        msg = 'Must supply at least one: name, description or metadata.'
         raise exceptions.ClientException(code=1, message=msg)
 
     shell_utils.find_backup(cs, args.backup).update(**kwargs)
@@ -963,11 +1076,152 @@ def do_cluster_disable(cs, args):
     utils.print_dict(cluster.to_dict())
 
 
-@api_versions.wraps('3.8')
+@api_versions.wraps('3.24')
+@utils.arg('--cluster', metavar='<cluster-name>', default=None,
+           help='Cluster name. Default=None.')
+@utils.arg('--host', metavar='<hostname>', default=None,
+           help='Service host name. Default=None.')
+@utils.arg('--binary', metavar='<binary>', default=None,
+           help='Service binary. Default=None.')
+@utils.arg('--is-up', metavar='<True|true|False|false>', dest='is_up',
+           default=None, choices=('True', 'true', 'False', 'false'),
+           help='Filter by up/down status, if set to true services need to be'
+                ' up, if set to false services need to be down.  Default is '
+                'None, which means up/down status is ignored.')
+@utils.arg('--disabled', metavar='<True|true|False|false>', default=None,
+           choices=('True', 'true', 'False', 'false'),
+           help='Filter by disabled status. Default=None.')
+@utils.arg('--resource-id', metavar='<resource-id>', default=None,
+           help='UUID of a resource to cleanup. Default=None.')
+@utils.arg('--resource-type', metavar='<Volume|Snapshot>', default=None,
+           choices=('Volume', 'Snapshot'),
+           help='Type of resource to cleanup.')
+@utils.arg('--service-id',
+           metavar='<service-id>',
+           type=int,
+           default=None,
+           help='The service id field from the DB, not the uuid of the'
+                ' service. Default=None.')
+def do_work_cleanup(cs, args):
+    """Request cleanup of services with optional filtering."""
+    filters = dict(cluster_name=args.cluster, host=args.host,
+                   binary=args.binary, is_up=args.is_up,
+                   disabled=args.disabled, resource_id=args.resource_id,
+                   resource_type=args.resource_type,
+                   service_id=args.service_id)
+
+    filters = {k: v for k, v in filters.items() if v is not None}
+
+    cleaning, unavailable = cs.workers.clean(**filters)
+
+    columns = ('ID', 'Cluster Name', 'Host', 'Binary')
+
+    if cleaning:
+        print('Following services will be cleaned:')
+        utils.print_list(cleaning, columns)
+
+    if unavailable:
+        print('There are no alternative nodes to do cleanup for the following '
+              'services:')
+        utils.print_list(unavailable, columns)
+
+    if not (cleaning or unavailable):
+        print('No cleanable services matched cleanup criteria.')
+
+
 @utils.arg('host',
            metavar='<host>',
-           help='Cinder host on which to list manageable volumes; '
+           help='Cinder host on which the existing volume resides; '
                 'takes the form: host@backend-name#pool')
+@utils.arg('--cluster',
+           help='Cinder cluster on which the existing volume resides; '
+                'takes the form: cluster@backend-name#pool',
+           start_version='3.16')
+@utils.arg('identifier',
+           metavar='<identifier>',
+           help='Name or other Identifier for existing volume')
+@utils.arg('--id-type',
+           metavar='<id-type>',
+           default='source-name',
+           help='Type of backend device identifier provided, '
+                'typically source-name or source-id (Default=source-name)')
+@utils.arg('--name',
+           metavar='<name>',
+           help='Volume name (Default=None)')
+@utils.arg('--description',
+           metavar='<description>',
+           help='Volume description (Default=None)')
+@utils.arg('--volume-type',
+           metavar='<volume-type>',
+           help='Volume type (Default=None)')
+@utils.arg('--availability-zone',
+           metavar='<availability-zone>',
+           help='Availability zone for volume (Default=None)')
+@utils.arg('--metadata',
+           type=str,
+           nargs='*',
+           metavar='<key=value>',
+           help='Metadata key=value pairs (Default=None)')
+@utils.arg('--bootable',
+           action='store_true',
+           help='Specifies that the newly created volume should be'
+                ' marked as bootable')
+def do_manage(cs, args):
+    """Manage an existing volume."""
+    volume_metadata = None
+    if args.metadata is not None:
+        volume_metadata = shell_utils.extract_metadata(args)
+
+    # Build a dictionary of key/value pairs to pass to the API.
+    ref_dict = {args.id_type: args.identifier}
+
+    # The recommended way to specify an existing volume is by ID or name, and
+    # have the Cinder driver look for 'source-name' or 'source-id' elements in
+    # the ref structure.  To make things easier for the user, we have special
+    # --source-name and --source-id CLI options that add the appropriate
+    # element to the ref structure.
+    #
+    # Note how argparse converts hyphens to underscores.  We use hyphens in the
+    # dictionary so that it is consistent with what the user specified on the
+    # CLI.
+
+    if hasattr(args, 'source_name') and args.source_name is not None:
+        ref_dict['source-name'] = args.source_name
+    if hasattr(args, 'source_id') and args.source_id is not None:
+        ref_dict['source-id'] = args.source_id
+
+    volume = cs.volumes.manage(host=args.host,
+                               ref=ref_dict,
+                               name=args.name,
+                               description=args.description,
+                               volume_type=args.volume_type,
+                               availability_zone=args.availability_zone,
+                               metadata=volume_metadata,
+                               bootable=args.bootable,
+                               cluster=getattr(args, 'cluster', None))
+
+    info = {}
+    volume = cs.volumes.get(volume.id)
+    info.update(volume._info)
+    info.pop('links', None)
+    utils.print_dict(info)
+
+
+@api_versions.wraps('3.8')
+# NOTE(geguileo): host is positional but optional in order to maintain backward
+# compatibility even with mutually exclusive arguments.  If version is < 3.16
+# then only host positional argument will be possible, and since the
+# exclusive_arg group has required=True it will be required even if it's
+# optional.
+@utils.exclusive_arg('source', 'host', required=True, nargs='?',
+                     metavar='<host>',
+                     help='Cinder host on which to list manageable volumes; '
+                          'takes the form: host@backend-name#pool')
+@utils.exclusive_arg('source', '--cluster', required=True,
+                     metavar='CLUSTER',
+                     help='Cinder cluster on which to list manageable '
+                     'volumes; takes the form: cluster@backend-name#pool',
+                     start_version='3.17')
 @utils.arg('--detailed',
            metavar='<detailed>',
            default=True,
@@ -999,9 +1253,11 @@ def do_manageable_list(cs, args):
     """Lists all manageable volumes."""
     # pylint: disable=function-redefined
     detailed = strutils.bool_from_string(args.detailed)
+    cluster = getattr(args, 'cluster', None)
     volumes = cs.volumes.list_manageable(host=args.host, detailed=detailed,
                                          marker=args.marker, limit=args.limit,
-                                         offset=args.offset, sort=args.sort)
+                                         offset=args.offset, sort=args.sort,
+                                         cluster=cluster)
     columns = ['reference', 'size', 'safe_to_manage']
     if detailed:
         columns.extend(['reason_not_safe', 'cinder_id', 'extra_info'])
@@ -1283,6 +1539,7 @@ def do_group_list_replication_targets(cs, args):
         utils.print_list(rep_targets, [key for key in rep_targets[0].keys()])
 
 
+@api_versions.wraps('3.14')
 @utils.arg('--all-tenants',
            dest='all_tenants',
            metavar='<0|1>',
@@ -1422,14 +1679,25 @@ def do_service_list(cs, args):
     # so as not to add the column when the extended ext is not enabled.
     if result and hasattr(result[0], 'disabled_reason'):
         columns.append("Disabled Reason")
+    if cs.api_version.matches('3.49'):
+        columns.extend(["Backend State"])
     utils.print_list(result, columns)
 
 
 @api_versions.wraps('3.8')
-@utils.arg('host',
-           metavar='<host>',
-           help='Cinder host on which to list manageable snapshots; '
-                'takes the form: host@backend-name#pool')
+# NOTE(geguileo): host is positional but optional in order to maintain backward
+# compatibility even with mutually exclusive arguments.  If version is < 3.16
+# then only host positional argument will be possible, and since the
+# exclusive_arg group has required=True it will be required even if it's
+# optional.
+@utils.exclusive_arg('source', 'host', required=True, nargs='?',
+                     metavar='<host>',
+                     help='Cinder host on which to list manageable snapshots; '
+                     'takes the form: host@backend-name#pool')
+@utils.exclusive_arg('source', '--cluster', required=True,
+                     help='Cinder cluster on which to list manageable '
+                     'snapshots; takes the form: cluster@backend-name#pool',
+                     start_version='3.17')
 @utils.arg('--detailed',
            metavar='<detailed>',
            default=True,
@@ -1461,12 +1729,14 @@ def do_snapshot_manageable_list(cs, args):
     """Lists all manageable snapshots."""
     # pylint: disable=function-redefined
     detailed = strutils.bool_from_string(args.detailed)
+    cluster = getattr(args, 'cluster', None)
     snapshots = cs.volume_snapshots.list_manageable(host=args.host,
                                                     detailed=detailed,
                                                     marker=args.marker,
                                                     limit=args.limit,
                                                     offset=args.offset,
-                                                    sort=args.sort)
+                                                    sort=args.sort,
+                                                    cluster=cluster)
     columns = ['reference', 'size', 'safe_to_manage', 'source_reference']
     if detailed:
         columns.extend(['reason_not_safe', 'cinder_id', 'extra_info'])
@@ -1687,9 +1957,20 @@ def do_message_delete(cs, args):
            help="Filter key and value pairs. Please use 'cinder list-filters' "
                 "to check enabled filters from server. Use 'key~=value' "
                 "for inexact filtering if the key supports. Default=None.")
+@utils.arg('--with-count',
+           type=bool,
+           default=False,
+           const=True,
+           nargs='?',
+           start_version='3.45',
+           metavar='<True|False>',
+           help="Show total number of snapshot entities. This is useful when "
+                "pagination is applied in the request.")
 def do_snapshot_list(cs, args):
     """Lists all snapshots."""
     # pylint: disable=function-redefined
+    show_count = True if hasattr(
+        args, 'with_count') and args.with_count else False
     all_tenants = (1 if args.tenant else
                    int(os.environ.get("ALL_TENANTS", args.all_tenants)))
 
@@ -1716,10 +1997,20 @@ def do_snapshot_list(cs, args):
     if hasattr(args, 'filters') and args.filters is not None:
         search_opts.update(shell_utils.extract_filters(args.filters))
 
-    snapshots = cs.volume_snapshots.list(search_opts=search_opts,
-                                         marker=args.marker,
-                                         limit=args.limit,
-                                         sort=args.sort)
+    total_count = 0
+    if show_count:
+        search_opts['with_count'] = args.with_count
+        snapshots, total_count = cs.volume_snapshots.list(
+            search_opts=search_opts,
+            marker=args.marker,
+            limit=args.limit,
+            sort=args.sort)
+    else:
+        snapshots = cs.volume_snapshots.list(search_opts=search_opts,
+                                             marker=args.marker,
+                                             limit=args.limit,
+                                             sort=args.sort)
+
     shell_utils.translate_volume_snapshot_keys(snapshots)
     sortby_index = None if args.sort else 0
     if cs.api_version >= api_versions.APIVersion("3.41"):
@@ -1731,6 +2022,8 @@ def do_snapshot_list(cs, args):
         utils.print_list(snapshots,
                          ['ID', 'Volume ID', 'Status', 'Name', 'Size'],
                          sortby_index=sortby_index)
+    if show_count:
+        print("Snapshot in total: %s" % total_count)
 
 
 @api_versions.wraps('3.27')
@@ -1866,6 +2159,13 @@ def do_attachment_show(cs, args):
            metavar='<mountpoint>',
            default=None,
            help='Mountpoint volume will be attached at. Default=None.')
+@utils.arg('--mode',
+           metavar='<mode>',
+           default='null',
+           start_version='3.54',
+           help='Mode of attachment, rw, ro and null, where null '
+                'indicates we want to honor any existing '
+                'admin-metadata settings.  Default=null.')
 def do_attachment_create(cs, args):
     """Create an attachment for a cinder volume."""
 
@@ -1880,9 +2180,12 @@ def do_attachment_create(cs, args):
                      'multipath': args.multipath,
                      'mountpoint': args.mountpoint}
     volume = utils.find_volume(cs, args.volume)
+    mode = getattr(args, 'mode', 'null')
     attachment = cs.attachments.create(volume.id,
                                        connector,
-                                       args.server_id)
+                                       args.server_id,
+                                       mode)
+
     connector_dict = attachment.pop('connection_info', None)
     utils.print_dict(attachment)
     if connector_dict:
@@ -2022,7 +2325,7 @@ def do_service_get_log(cs, args):
     columns = ('Binary', 'Host', 'Prefix', 'Level')
     utils.print_list(log_levels, columns)
 
-@api_versions.wraps('3.43')
+
 @utils.arg('volume', metavar='<volume>',
            help='Name or ID of volume to backup.')
 @utils.arg('--container', metavar='<container>',
@@ -2060,7 +2363,13 @@ def do_service_get_log(cs, args):
            nargs='*',
            metavar='<key=value>',
            default=None,
+           start_version='3.43',
            help='Metadata key and value pairs. Default=None.')
+@utils.arg('--availability-zone',
+           default=None,
+           start_version='3.51',
+           help='AZ where the backup should be stored, by default it will be '
+           'the same as the source.')
 def do_backup_create(cs, args):
     """Creates a volume backup."""
     if args.display_name is not None:
@@ -2068,6 +2377,13 @@ def do_backup_create(cs, args):
 
     if args.display_description is not None:
         args.description = args.display_description
+
+    kwargs = {}
+    if getattr(args, 'metadata', None):
+        kwargs['metadata'] = shell_utils.extract_metadata(args)
+    az = getattr(args, 'availability_zone', None)
+    if az:
+        kwargs['availability_zone'] = az
 
     volume = utils.find_volume(cs, args.volume)
     backup = cs.backups.create(volume.id,
@@ -2077,12 +2393,46 @@ def do_backup_create(cs, args):
                                args.incremental,
                                args.force,
                                args.snapshot_id,
-                               args.metadata)
-
+                               **kwargs)
     info = {"volume_id": volume.id}
     info.update(backup._info)
 
     if 'links' in info:
         info.pop('links')
 
+    utils.print_dict(info)
+
+
+@utils.arg('volume', metavar='<volume>',
+           help='Name or ID of volume to transfer.')
+@utils.arg('--name',
+           metavar='<name>',
+           default=None,
+           help='Transfer name. Default=None.')
+@utils.arg('--display-name',
+           help=argparse.SUPPRESS)
+@utils.arg('--no-snapshots',
+           action='store_true',
+           help='Allows or disallows transfer volumes without snapshots. '
+                'Default=False.',
+           start_version='3.55',
+           default=False)
+def do_transfer_create(cs, args):
+    """Creates a volume transfer."""
+    if args.display_name is not None:
+        args.name = args.display_name
+
+    kwargs = {}
+    no_snapshots = getattr(args, 'no_snapshots', None)
+    if no_snapshots is not None:
+        kwargs['no_snapshots'] = no_snapshots
+
+    volume = utils.find_volume(cs, args.volume)
+    transfer = cs.transfers.create(volume.id,
+                                   args.name,
+                                   **kwargs)
+    info = dict()
+    info.update(transfer._info)
+
+    info.pop('links', None)
     utils.print_dict(info)

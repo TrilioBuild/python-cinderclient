@@ -63,6 +63,7 @@ class GroupManager(base.ManagerWithFind):
     """Manage :class:`Group` resources."""
     resource_class = Group
 
+    @api_versions.wraps('3.13')
     def create(self, group_type, volume_types, name=None,
                description=None, user_id=None,
                project_id=None, availability_zone=None):
@@ -81,10 +82,7 @@ class GroupManager(base.ManagerWithFind):
                           'description': description,
                           'group_type': group_type,
                           'volume_types': volume_types.split(','),
-                          'user_id': user_id,
-                          'project_id': project_id,
                           'availability_zone': availability_zone,
-                          'status': "creating",
                           }}
 
         return self._create('/groups', body, 'group')
@@ -99,6 +97,7 @@ class GroupManager(base.ManagerWithFind):
         body = {'status': state} if state else {}
         return self._action('reset_status', group, body)
 
+    @api_versions.wraps('3.14')
     def create_from_src(self, group_snapshot_id, source_group_id,
                         name=None, description=None, user_id=None,
                         project_id=None):
@@ -112,13 +111,20 @@ class GroupManager(base.ManagerWithFind):
         :param project_id: Project id derived from context
         :rtype: A dictionary containing Group metadata
         """
+
+        # NOTE(wanghao): According the API schema in cinder side, client
+        # should NOT specify the group_snapshot_id and source_group_id at
+        # same time, even one of them is None.
+        if group_snapshot_id:
+            create_key = 'group_snapshot_id'
+            create_value = group_snapshot_id
+        elif source_group_id:
+            create_key = 'source_group_id'
+            create_value = source_group_id
+
         body = {'create-from-src': {'name': name,
                                     'description': description,
-                                    'group_snapshot_id': group_snapshot_id,
-                                    'source_group_id': source_group_id,
-                                    'user_id': user_id,
-                                    'project_id': project_id,
-                                    'status': "creating", }}
+                                    create_key: create_value}}
 
         self.run_hooks('modify_body_for_action', body,
                        'create-from-src')
@@ -126,6 +132,7 @@ class GroupManager(base.ManagerWithFind):
             "/groups/action", body=body)
         return common_base.DictWithMeta(body['group'], resp)
 
+    @api_versions.wraps('3.13')
     def get(self, group_id, **kwargs):
         """Get a group.
 
@@ -142,6 +149,7 @@ class GroupManager(base.ManagerWithFind):
         return self._get("/groups/%s" % group_id + query_string,
                          "group")
 
+    @api_versions.wraps('3.13')
     def list(self, detailed=True, search_opts=None, list_volume=False):
         """Lists all groups.
 
@@ -160,6 +168,7 @@ class GroupManager(base.ManagerWithFind):
         return self._list("/groups%s%s" % (detail, query_string),
                           "groups")
 
+    @api_versions.wraps('3.13')
     def delete(self, group, delete_volumes=False):
         """Delete a group.
 
@@ -172,6 +181,7 @@ class GroupManager(base.ManagerWithFind):
         resp, body = self.api.client.post(url, body=body)
         return common_base.TupleWithMeta((resp, body), resp)
 
+    @api_versions.wraps('3.13')
     def update(self, group, **kwargs):
         """Update the name or description for a group.
 
@@ -200,6 +210,7 @@ class GroupManager(base.ManagerWithFind):
         resp, body = self.api.client.post(url, body=body)
         return common_base.TupleWithMeta((resp, body), resp)
 
+    @api_versions.wraps('3.38')
     def enable_replication(self, group):
         """Enables replication for a group.
 
@@ -211,6 +222,7 @@ class GroupManager(base.ManagerWithFind):
         resp, body = self.api.client.post(url, body=body)
         return common_base.TupleWithMeta((resp, body), resp)
 
+    @api_versions.wraps('3.38')
     def disable_replication(self, group):
         """disables replication for a group.
 
@@ -222,6 +234,7 @@ class GroupManager(base.ManagerWithFind):
         resp, body = self.api.client.post(url, body=body)
         return common_base.TupleWithMeta((resp, body), resp)
 
+    @api_versions.wraps('3.38')
     def failover_replication(self, group, allow_attached_volume=False,
                              secondary_backend_id=None):
         """fails over replication for a group.
@@ -241,6 +254,7 @@ class GroupManager(base.ManagerWithFind):
         resp, body = self.api.client.post(url, body=body)
         return common_base.TupleWithMeta((resp, body), resp)
 
+    @api_versions.wraps('3.38')
     def list_replication_targets(self, group):
         """List replication targets for a group.
 

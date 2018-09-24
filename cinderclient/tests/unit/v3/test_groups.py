@@ -16,10 +16,11 @@
 
 import ddt
 
+from cinderclient import api_versions
 from cinderclient.tests.unit import utils
 from cinderclient.tests.unit.v3 import fakes
 
-cs = fakes.FakeClient()
+cs = fakes.FakeClient(api_versions.APIVersion('3.13'))
 
 
 @ddt.ddt
@@ -45,14 +46,11 @@ class GroupsTest(utils.TestCase):
 
     def test_create_group_with_volume_types(self):
         grp = cs.groups.create('my_group_type', 'type1,type2', name='group')
-        expected = {'group': {'status': 'creating',
-                              'description': None,
+        expected = {'group': {'description': None,
                               'availability_zone': None,
-                              'user_id': None,
                               'name': 'group',
                               'group_type': 'my_group_type',
-                              'volume_types': ['type1', 'type2'],
-                              'project_id': None}}
+                              'volume_types': ['type1', 'type2']}}
         cs.assert_called('POST', '/groups', body=expected)
         self._assert_request_id(grp)
 
@@ -126,16 +124,13 @@ class GroupsTest(utils.TestCase):
         self._assert_request_id(grp)
 
     def test_create_group_from_src_snap(self):
+        cs = fakes.FakeClient(api_versions.APIVersion('3.14'))
         grp = cs.groups.create_from_src('5678', None, name='group')
         expected = {
             'create-from-src': {
-                'status': 'creating',
                 'description': None,
-                'user_id': None,
                 'name': 'group',
-                'group_snapshot_id': '5678',
-                'project_id': None,
-                'source_group_id': None
+                'group_snapshot_id': '5678'
             }
         }
         cs.assert_called('POST', '/groups/action',
@@ -143,16 +138,13 @@ class GroupsTest(utils.TestCase):
         self._assert_request_id(grp)
 
     def test_create_group_from_src_group_(self):
+        cs = fakes.FakeClient(api_versions.APIVersion('3.14'))
         grp = cs.groups.create_from_src(None, '5678', name='group')
         expected = {
             'create-from-src': {
-                'status': 'creating',
                 'description': None,
-                'user_id': None,
                 'name': 'group',
-                'source_group_id': '5678',
-                'project_id': None,
-                'group_snapshot_id': None
+                'source_group_id': '5678'
             }
         }
         cs.assert_called('POST', '/groups/action',
@@ -160,6 +152,7 @@ class GroupsTest(utils.TestCase):
         self._assert_request_id(grp)
 
     def test_enable_replication_group(self):
+        cs = fakes.FakeClient(api_versions.APIVersion('3.38'))
         expected = {'enable_replication': {}}
         g0 = cs.groups.list()[0]
         grp = g0.enable_replication()
@@ -173,6 +166,7 @@ class GroupsTest(utils.TestCase):
         cs.assert_called('POST', '/groups/1234/action', body=expected)
 
     def test_disable_replication_group(self):
+        cs = fakes.FakeClient(api_versions.APIVersion('3.38'))
         expected = {'disable_replication': {}}
         g0 = cs.groups.list()[0]
         grp = g0.disable_replication()
@@ -186,6 +180,7 @@ class GroupsTest(utils.TestCase):
         cs.assert_called('POST', '/groups/1234/action', body=expected)
 
     def test_failover_replication_group(self):
+        cs = fakes.FakeClient(api_versions.APIVersion('3.38'))
         expected = {'failover_replication':
                     {'allow_attached_volume': False,
                      'secondary_backend_id': None}}
@@ -201,6 +196,7 @@ class GroupsTest(utils.TestCase):
         cs.assert_called('POST', '/groups/1234/action', body=expected)
 
     def test_list_replication_targets(self):
+        cs = fakes.FakeClient(api_versions.APIVersion('3.38'))
         expected = {'list_replication_targets': {}}
         g0 = cs.groups.list()[0]
         grp = g0.list_replication_targets()

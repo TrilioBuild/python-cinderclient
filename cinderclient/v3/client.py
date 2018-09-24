@@ -13,8 +13,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import logging
-
 from cinderclient import api_versions
 from cinderclient import client
 from cinderclient.v3 import attachments
@@ -42,6 +40,7 @@ from cinderclient.v3 import volume_transfers
 from cinderclient.v3 import volume_type_access
 from cinderclient.v3 import volume_types
 from cinderclient.v3 import volumes
+from cinderclient.v3 import workers
 
 
 class Client(object):
@@ -91,6 +90,7 @@ class Client(object):
         self.transfers = volume_transfers.VolumeTransferManager(self)
         self.services = services.ServiceManager(self)
         self.clusters = clusters.ClusterManager(self)
+        self.workers = workers.WorkerManager(self)
         self.consistencygroups = consistencygroups.\
             ConsistencygroupManager(self)
         self.groups = groups.GroupManager(self)
@@ -109,9 +109,6 @@ class Client(object):
                 if extension.manager_class:
                     setattr(self, extension.name,
                             extension.manager_class(self))
-
-        if not logger:
-            logger = logging.getLogger(__name__)
 
         self.client = client._construct_http_client(
             username=username,

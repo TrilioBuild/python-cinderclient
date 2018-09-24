@@ -96,6 +96,9 @@ class ShellTest(utils.TestCase):
         return self.shell.cs.assert_called(method, url, body,
                                            partial_body, **kwargs)
 
+    def assert_call_contained(self, url_part):
+        self.shell.cs.assert_in_call(url_part)
+
     @ddt.data({'resource': None, 'query_url': None},
               {'resource': 'volume', 'query_url': '?resource=volume'},
               {'resource': 'group', 'query_url': '?resource=group'})
@@ -231,6 +234,10 @@ class ShellTest(utils.TestCase):
         # NOTE(jdg): we default to detail currently
         self.assert_called('GET', '/volumes/detail')
 
+    def test_list_with_with_count(self):
+        self.run_command('--os-volume-api-version 3.45 list --with-count')
+        self.assert_called('GET', '/volumes/detail?with_count=True')
+
     def test_summary(self):
         self.run_command('--os-volume-api-version 3.12 summary')
         self.assert_called('GET', '/volumes/summary')
@@ -239,6 +246,26 @@ class ShellTest(utils.TestCase):
         self.assertRaises(exceptions.UnsupportedAttribute,
                           self.run_command,
                           'list --group_id fake_id')
+
+    def test_type_list_with_filters_invalid(self):
+        self.assertRaises(exceptions.UnsupportedAttribute,
+                          self.run_command,
+                          '--os-volume-api-version 3.51 type-list '
+                          '--filters key=value')
+
+    def test_type_list_with_filters(self):
+        self.run_command('--os-volume-api-version 3.52 type-list '
+                         '--filters extra_specs={key:value}')
+        self.assert_called('GET', mock.ANY)
+        self.assert_call_contained(
+            parse.urlencode(
+                {'extra_specs':
+                    {six.text_type('key'): six.text_type('value')}}))
+        self.assert_call_contained(parse.urlencode({'is_public': None}))
+
+    def test_type_list_no_filters(self):
+        self.run_command('--os-volume-api-version 3.52 type-list')
+        self.assert_called('GET', '/types?is_public=None')
 
     @ddt.data("3.10", "3.11")
     def test_list_with_group_id_after_3_10(self, version):
@@ -291,6 +318,49 @@ class ShellTest(utils.TestCase):
                                                        {'id': '1234'},
                                                        loaded=True)
         command = '--os-volume-api-version 3.27 attachment-create '
+        command += cmd
+        self.run_command(command)
+        expected = {'attachment': body}
+        self.assertTrue(mock_find_volume.called)
+        self.assert_called('POST', '/attachments', body=expected)
+
+    @ddt.data({'cmd': '1234 1233',
+               'body': {'instance_uuid': '1233',
+                        'connector': {},
+                        'volume_uuid': '1234',
+                        'mode': 'ro'}},
+              {'cmd': '1234 1233 '
+                      '--connect True '
+                      '--ip 10.23.12.23 --host server01 '
+                      '--platform x86_xx '
+                      '--ostype 123 '
+                      '--multipath true '
+                      '--mountpoint /123 '
+                      '--initiator aabbccdd',
+               'body': {'instance_uuid': '1233',
+                        'connector': {'ip': '10.23.12.23',
+                                      'host': 'server01',
+                                      'os_type': '123',
+                                      'multipath': 'true',
+                                      'mountpoint': '/123',
+                                      'initiator': 'aabbccdd',
+                                      'platform': 'x86_xx'},
+                        'volume_uuid': '1234',
+                        'mode': 'ro'}},
+              {'cmd': 'abc 1233',
+               'body': {'instance_uuid': '1233',
+                        'connector': {},
+                        'volume_uuid': '1234',
+                        'mode': 'ro'}})
+    @mock.patch('cinderclient.utils.find_resource')
+    @ddt.unpack
+    def test_attachment_create_with_mode(self, mock_find_volume, cmd, body):
+        mock_find_volume.return_value = volumes.Volume(self,
+                                                       {'id': '1234'},
+                                                       loaded=True)
+        command = ('--os-volume-api-version 3.54 '
+                   'attachment-create '
+                   '--mode ro ')
         command += cmd
         self.run_command(command)
         expected = {'attachment': body}
@@ -430,20 +500,36 @@ class ShellTest(utils.TestCase):
         expected = {'backup': {'name': 'new_name'}}
         self.assert_called('PUT', '/backups/1234', body=expected)
 
+    def test_backup_list_with_with_count(self):
+        self.run_command(
+            '--os-volume-api-version 3.45 backup-list --with-count')
+        self.assert_called('GET', '/backups/detail?with_count=True')
+
     def test_backup_update_with_description(self):
         self.run_command('--os-volume-api-version 3.9 '
                          'backup-update 1234 --description=new-description')
         expected = {'backup': {'description': 'new-description'}}
         self.assert_called('PUT', '/backups/1234', body=expected)
 
+    def test_backup_update_with_metadata(self):
+        cmd = '--os-volume-api-version 3.43 '
+        cmd += 'backup-update '
+        cmd += '--metadata foo=bar '
+        cmd += '1234'
+        self.run_command(cmd)
+        expected = {'backup': {'metadata': {'foo': 'bar'}}}
+        self.assert_called('PUT', '/backups/1234', body=expected)
+
     def test_backup_update_all(self):
         # rename and change description
-        self.run_command('--os-volume-api-version 3.9 '
+        self.run_command('--os-volume-api-version 3.43 '
                          'backup-update --name new-name '
-                         '--description=new-description 1234')
+                         '--description=new-description '
+                         '--metadata foo=bar 1234')
         expected = {'backup': {
             'name': 'new-name',
             'description': 'new-description',
+            'metadata': {'foo': 'bar'}
         }}
         self.assert_called('PUT', '/backups/1234', body=expected)
 
@@ -506,13 +592,8 @@ class ShellTest(utils.TestCase):
                          '--volume-type 4321 1')
         self.assert_called('GET', '/volumes/1234')
         expected = {'volume': {'imageRef': None,
-                               'project_id': None,
-                               'status': 'creating',
                                'size': 1,
-                               'user_id': None,
                                'availability_zone': None,
-                               'source_replica': None,
-                               'attach_status': 'detached',
                                'source_volid': None,
                                'consistencygroup_id': None,
                                'group_id': '5678',
@@ -521,8 +602,33 @@ class ShellTest(utils.TestCase):
                                'metadata': {},
                                'volume_type': '4321',
                                'description': None,
-                               'multiattach': False}}
+                               'multiattach': False,
+                               'backup_id': None}}
         self.assert_called_anytime('POST', '/volumes', expected)
+
+    @ddt.data({'cmd': '--os-volume-api-version 3.47 create --backup-id 1234',
+               'update': {'backup_id': '1234'}},
+              {'cmd': '--os-volume-api-version 3.47 create 2',
+               'update': {'size': 2}}
+              )
+    @ddt.unpack
+    def test_create_volume_with_backup(self, cmd, update):
+        self.run_command(cmd)
+        self.assert_called('GET', '/volumes/1234')
+        expected = {'volume': {'imageRef': None,
+                               'size': None,
+                               'availability_zone': None,
+                               'source_volid': None,
+                               'consistencygroup_id': None,
+                               'name': None,
+                               'snapshot_id': None,
+                               'metadata': {},
+                               'volume_type': None,
+                               'description': None,
+                               'multiattach': False,
+                               'backup_id': None}}
+        expected['volume'].update(update)
+        self.assert_called_anytime('POST', '/volumes', body=expected)
 
     def test_group_list(self):
         self.run_command('--os-volume-api-version 3.13 group-list')
@@ -555,9 +661,6 @@ class ShellTest(utils.TestCase):
     def test_group_create(self):
         expected = {'group': {'name': 'test-1',
                               'description': 'test-1-desc',
-                              'user_id': None,
-                              'project_id': None,
-                              'status': 'creating',
                               'group_type': 'my_group_type',
                               'volume_types': ['type1', 'type2'],
                               'availability_zone': 'zone1'}}
@@ -603,10 +706,7 @@ class ShellTest(utils.TestCase):
     def test_group_snapshot_create(self):
         expected = {'group_snapshot': {'name': 'test-1',
                                        'description': 'test-1-desc',
-                                       'user_id': None,
-                                       'project_id': None,
-                                       'group_id': '1234',
-                                       'status': 'creating'}}
+                                       'group_id': '1234'}}
         self.run_command('--os-volume-api-version 3.14 '
                          'group-snapshot-create --name test-1 '
                          '--description test-1-desc 1234')
@@ -621,12 +721,12 @@ class ShellTest(utils.TestCase):
     @ddt.unpack
     def test_group_create_from_src(self, grp_snap_id, src_grp_id, src):
         expected = {'create-from-src': {'name': 'test-1',
-                                        'description': 'test-1-desc',
-                                        'user_id': None,
-                                        'project_id': None,
-                                        'status': 'creating',
-                                        'group_snapshot_id': grp_snap_id,
-                                        'source_group_id': src_grp_id}}
+                                        'description': 'test-1-desc'}}
+        if grp_snap_id:
+            expected['create-from-src']['group_snapshot_id'] = grp_snap_id
+        elif src_grp_id:
+            expected['create-from-src']['source_group_id'] = src_grp_id
+
         cmd = ('--os-volume-api-version 3.14 '
                'group-create-from-src --name test-1 '
                '--description test-1-desc ')
@@ -649,6 +749,11 @@ class ShellTest(utils.TestCase):
                          'manageable-list fakehost --detailed False')
         self.assert_called('GET', '/manageable_volumes?host=fakehost')
 
+    def test_volume_manageable_list_cluster(self):
+        self.run_command('--os-volume-api-version 3.17 '
+                         'manageable-list --cluster dest')
+        self.assert_called('GET', '/manageable_volumes/detail?cluster=dest')
+
     def test_snapshot_manageable_list(self):
         self.run_command('--os-volume-api-version 3.8 '
                          'snapshot-manageable-list fakehost')
@@ -663,6 +768,36 @@ class ShellTest(utils.TestCase):
         self.run_command('--os-volume-api-version 3.8 '
                          'snapshot-manageable-list fakehost --detailed False')
         self.assert_called('GET', '/manageable_snapshots?host=fakehost')
+
+    def test_snapshot_manageable_list_cluster(self):
+        self.run_command('--os-volume-api-version 3.17 '
+                         'snapshot-manageable-list --cluster dest')
+        self.assert_called('GET', '/manageable_snapshots/detail?cluster=dest')
+
+    @ddt.data('', 'snapshot-')
+    def test_manageable_list_cluster_before_3_17(self, prefix):
+        self.assertRaises(exceptions.UnsupportedAttribute,
+                          self.run_command,
+                          '--os-volume-api-version 3.16 '
+                         '%smanageable-list --cluster dest' % prefix)
+
+    @mock.patch('cinderclient.shell.CinderClientArgumentParser.error')
+    @ddt.data('', 'snapshot-')
+    def test_manageable_list_mutual_exclusion(self, prefix, error_mock):
+        error_mock.side_effect = SystemExit
+        self.assertRaises(SystemExit,
+                          self.run_command,
+                          '--os-volume-api-version 3.17 '
+                         '%smanageable-list fakehost --cluster dest' % prefix)
+
+    @mock.patch('cinderclient.shell.CinderClientArgumentParser.error')
+    @ddt.data('', 'snapshot-')
+    def test_manageable_list_missing_required(self, prefix, error_mock):
+        error_mock.side_effect = SystemExit
+        self.assertRaises(SystemExit,
+                          self.run_command,
+                          '--os-volume-api-version 3.17 '
+                         '%smanageable-list' % prefix)
 
     def test_list_messages(self):
         self.run_command('--os-volume-api-version 3.3 message-list')
@@ -741,6 +876,11 @@ class ShellTest(utils.TestCase):
         self.run_command('reset-state %s 1234' % command)
         expected = {'os-reset_status': expected}
         self.assert_called('POST', '/volumes/1234/action', body=expected)
+
+    def test_snapshot_list_with_with_count(self):
+        self.run_command(
+            '--os-volume-api-version 3.45 snapshot-list --with-count')
+        self.assert_called('GET', '/snapshots/detail?with_count=True')
 
     def test_snapshot_list_with_metadata(self):
         self.run_command('--os-volume-api-version 3.22 '
@@ -997,13 +1137,44 @@ class ShellTest(utils.TestCase):
                 mock_time.sleep.call_args_list)
         self.assertEqual([mock.call(some_id)] * 2, poll_fn.call_args_list)
 
+    def test_backup(self):
+        self.run_command('--os-volume-api-version 3.42 backup-create '
+                         '--name 1234 1234')
+        expected = {'backup': {'volume_id': 1234,
+                               'container': None,
+                               'name': '1234',
+                               'description': None,
+                               'incremental': False,
+                               'force': False,
+                               'snapshot_id': None,
+                               }}
+        self.assert_called('POST', '/backups', body=expected)
+
     def test_backup_with_metadata(self):
-        cmd = '--os-volume-api-version 3.43 '
-        cmd += 'backup-create '
-        cmd += '--metadata foo=bar '
-        cmd += '1234'
-        self.run_command(cmd)
-        self.assert_called('POST', '/backups')
+        self.run_command('--os-volume-api-version 3.43 backup-create '
+                         '--metadata foo=bar --name 1234 1234')
+        expected = {'backup': {'volume_id': 1234,
+                               'container': None,
+                               'name': '1234',
+                               'description': None,
+                               'incremental': False,
+                               'force': False,
+                               'snapshot_id': None,
+                               'metadata': {'foo': 'bar'}, }}
+        self.assert_called('POST', '/backups', body=expected)
+
+    def test_backup_with_az(self):
+        self.run_command('--os-volume-api-version 3.51 backup-create '
+                         '--availability-zone AZ2 --name 1234 1234')
+        expected = {'backup': {'volume_id': 1234,
+                               'container': None,
+                               'name': '1234',
+                               'description': None,
+                               'incremental': False,
+                               'force': False,
+                               'snapshot_id': None,
+                               'availability_zone': 'AZ2'}}
+        self.assert_called('POST', '/backups', body=expected)
 
     @mock.patch("cinderclient.utils.print_list")
     def test_snapshot_list_with_userid(self, mock_print_list):
@@ -1013,3 +1184,167 @@ class ShellTest(utils.TestCase):
         columns = ['ID', 'Volume ID', 'Status', 'Name', 'Size', 'User ID']
         mock_print_list.assert_called_once_with(mock.ANY, columns,
                                                 sortby_index=0)
+
+    @mock.patch('cinderclient.v3.volumes.Volume.migrate_volume')
+    def test_migrate_volume_before_3_16(self, v3_migrate_mock):
+        self.run_command('--os-volume-api-version 3.15 '
+                         'migrate 1234 fakehost')
+
+        v3_migrate_mock.assert_called_once_with(
+            'fakehost', False, False, None)
+
+    @mock.patch('cinderclient.v3.volumes.Volume.migrate_volume')
+    def test_migrate_volume_3_16(self, v3_migrate_mock):
+        self.run_command('--os-volume-api-version 3.16 '
+                         'migrate 1234 fakehost')
+        self.assertEqual(4, len(v3_migrate_mock.call_args[0]))
+
+    def test_migrate_volume_with_cluster_before_3_16(self):
+        self.assertRaises(exceptions.UnsupportedAttribute,
+                          self.run_command,
+                          '--os-volume-api-version 3.15 '
+                          'migrate 1234 fakehost --cluster fakecluster')
+
+    @mock.patch('cinderclient.shell.CinderClientArgumentParser.error')
+    def test_migrate_volume_mutual_exclusion(self, error_mock):
+        error_mock.side_effect = SystemExit
+        self.assertRaises(SystemExit,
+                          self.run_command,
+                          '--os-volume-api-version 3.16 '
+                          'migrate 1234 fakehost --cluster fakecluster')
+        msg = 'argument --cluster: not allowed with argument <host>'
+        error_mock.assert_called_once_with(msg)
+
+    @mock.patch('cinderclient.shell.CinderClientArgumentParser.error')
+    def test_migrate_volume_missing_required(self, error_mock):
+        error_mock.side_effect = SystemExit
+        self.assertRaises(SystemExit,
+                          self.run_command,
+                          '--os-volume-api-version 3.16 '
+                          'migrate 1234')
+        msg = 'one of the arguments <host> --cluster is required'
+        error_mock.assert_called_once_with(msg)
+
+    def test_migrate_volume_host(self):
+        self.run_command('--os-volume-api-version 3.16 '
+                         'migrate 1234 fakehost')
+        expected = {'os-migrate_volume': {'force_host_copy': False,
+                                          'lock_volume': False,
+                                          'host': 'fakehost'}}
+        self.assert_called('POST', '/volumes/1234/action', body=expected)
+
+    def test_migrate_volume_cluster(self):
+        self.run_command('--os-volume-api-version 3.16 '
+                         'migrate 1234 --cluster mycluster')
+        expected = {'os-migrate_volume': {'force_host_copy': False,
+                                          'lock_volume': False,
+                                          'cluster': 'mycluster'}}
+        self.assert_called('POST', '/volumes/1234/action', body=expected)
+
+    def test_migrate_volume_bool_force(self):
+        self.run_command('--os-volume-api-version 3.16 '
+                         'migrate 1234 fakehost --force-host-copy '
+                         '--lock-volume')
+        expected = {'os-migrate_volume': {'force_host_copy': True,
+                                          'lock_volume': True,
+                                          'host': 'fakehost'}}
+        self.assert_called('POST', '/volumes/1234/action', body=expected)
+
+    def test_migrate_volume_bool_force_false(self):
+        # Set both --force-host-copy and --lock-volume to False.
+        self.run_command('--os-volume-api-version 3.16 '
+                         'migrate 1234 fakehost --force-host-copy=False '
+                         '--lock-volume=False')
+        expected = {'os-migrate_volume': {'force_host_copy': 'False',
+                                          'lock_volume': 'False',
+                                          'host': 'fakehost'}}
+        self.assert_called('POST', '/volumes/1234/action', body=expected)
+
+        # Do not set the values to --force-host-copy and --lock-volume.
+        self.run_command('--os-volume-api-version 3.16 '
+                         'migrate 1234 fakehost')
+        expected = {'os-migrate_volume': {'force_host_copy': False,
+                                          'lock_volume': False,
+                                          'host': 'fakehost'}}
+        self.assert_called('POST', '/volumes/1234/action',
+                           body=expected)
+
+    @ddt.data({'bootable': False, 'by_id': False, 'cluster': None},
+              {'bootable': True, 'by_id': False, 'cluster': None},
+              {'bootable': False, 'by_id': True, 'cluster': None},
+              {'bootable': True, 'by_id': True, 'cluster': None},
+              {'bootable': True, 'by_id': True, 'cluster': 'clustername'})
+    @ddt.unpack
+    def test_volume_manage(self, bootable, by_id, cluster):
+        cmd = ('--os-volume-api-version 3.16 '
+               'manage host1 some_fake_name --name foo --description bar '
+               '--volume-type baz --availability-zone az '
+               '--metadata k1=v1 k2=v2')
+        if by_id:
+            cmd += ' --id-type source-id'
+        if bootable:
+            cmd += ' --bootable'
+        if cluster:
+            cmd += ' --cluster ' + cluster
+
+        self.run_command(cmd)
+        ref = 'source-id' if by_id else 'source-name'
+        expected = {'volume': {'host': 'host1',
+                               'ref': {ref: 'some_fake_name'},
+                               'name': 'foo',
+                               'description': 'bar',
+                               'volume_type': 'baz',
+                               'availability_zone': 'az',
+                               'metadata': {'k1': 'v1', 'k2': 'v2'},
+                               'bootable': bootable}}
+        if cluster:
+            expected['volume']['cluster'] = cluster
+        self.assert_called_anytime('POST', '/os-volume-manage', body=expected)
+
+    def test_volume_manage_before_3_16(self):
+        """Cluster optional argument was not acceptable."""
+        self.assertRaises(exceptions.UnsupportedAttribute,
+                          self.run_command,
+                          'manage host1 some_fake_name '
+                          '--cluster clustername'
+                          '--name foo --description bar --bootable '
+                          '--volume-type baz --availability-zone az '
+                          '--metadata k1=v1 k2=v2')
+
+    def test_worker_cleanup_before_3_24(self):
+        self.assertRaises(SystemExit,
+                          self.run_command,
+                          'work-cleanup fakehost')
+
+    def test_worker_cleanup(self):
+        self.run_command('--os-volume-api-version 3.24 '
+                         'work-cleanup --cluster clustername --host hostname '
+                         '--binary binaryname --is-up false --disabled true '
+                         '--resource-id uuid --resource-type Volume '
+                         '--service-id 1')
+        expected = {'cluster_name': 'clustername',
+                    'host': 'hostname',
+                    'binary': 'binaryname',
+                    'is_up': 'false',
+                    'disabled': 'true',
+                    'resource_id': 'uuid',
+                    'resource_type': 'Volume',
+                    'service_id': 1}
+
+        self.assert_called('POST', '/workers/cleanup', body=expected)
+
+    def test_create_transfer(self):
+        self.run_command('transfer-create 1234')
+        expected = {'transfer': {'volume_id': 1234,
+                                 'name': None,
+                                 }}
+        self.assert_called('POST', '/volume-transfers', body=expected)
+
+    def test_create_transfer_no_snaps(self):
+        self.run_command('--os-volume-api-version 3.55 transfer-create '
+                         '--no-snapshots 1234')
+        expected = {'transfer': {'volume_id': 1234,
+                                 'name': None,
+                                 'no_snapshots': True
+                                 }}
+        self.assert_called('POST', '/volume-transfers', body=expected)

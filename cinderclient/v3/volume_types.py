@@ -15,6 +15,7 @@
 
 
 """Volume Type interface."""
+from six.moves.urllib import parse
 
 from cinderclient.apiclient import base as common_base
 from cinderclient import base
@@ -84,12 +85,24 @@ class VolumeTypeManager(base.ManagerWithFind):
     def list(self, search_opts=None, is_public=None):
         """Lists all volume types.
 
-        :rtype: list of :class:`VolumeType`.
+        :param search_opts: Optional search filters.
+        :param is_public: Whether to only get public types.
+        :return: List of :class:`VolumeType`.
         """
-        query_string = ''
-        if not is_public:
-            query_string = '?is_public=%s' % is_public
-        return self._list("/types%s" % (query_string), "volume_types")
+        if not search_opts:
+            search_opts = dict()
+
+        # Remove 'all_tenants' option added by ManagerWithFind.findall(),
+        # as it is not a valid search option for volume_types.
+        search_opts.pop('all_tenants', None)
+
+        # Need to keep backwards compatibility with is_public usage. If it
+        # isn't included then cinder will assume you want is_public=True, which
+        # negatively affects the results.
+        search_opts['is_public'] = is_public
+
+        query_string = "?%s" % parse.urlencode(search_opts)
+        return self._list("/types%s" % query_string, "volume_types")
 
     def get(self, volume_type):
         """Get a specific volume type.

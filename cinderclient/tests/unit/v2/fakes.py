@@ -389,9 +389,12 @@ class FakeHTTPClient(base_client.HTTPClient):
     #
 
     def get_snapshots_detail(self, **kw):
+        if kw.get('with_count', False):
+            return (200, {}, {'snapshots': [
+                _stub_snapshot(),
+            ], 'count': 1})
         return (200, {}, {'snapshots': [
-            _stub_snapshot(),
-        ]})
+            _stub_snapshot()]})
 
     def get_snapshots_1234(self, **kw):
         return (200, {}, {'snapshot': _stub_snapshot(id='1234')})
@@ -464,6 +467,10 @@ class FakeHTTPClient(base_client.HTTPClient):
             ]})
 
     def get_volumes_detail(self, **kw):
+        if kw.get('with_count', False):
+            return (200, {}, {"volumes": [
+                _stub_volume(id=kw.get('id', 1234))
+            ], "count": 1})
         return (200, {}, {"volumes": [
             _stub_volume(id=kw.get('id', 1234))
         ]})
@@ -541,6 +548,15 @@ class FakeHTTPClient(base_client.HTTPClient):
             assert 'snapshot_id' in body[action]
         else:
             raise AssertionError("Unexpected action: %s" % action)
+        return (resp, {}, _body)
+
+    def get_volumes_fake(self, **kw):
+        r = {'volume': self.get_volumes_detail(id='fake')[2]['volumes'][0]}
+        return (200, {}, r)
+
+    def post_volumes_fake_action(self, body, **kw):
+        _body = None
+        resp = 202
         return (resp, {}, _body)
 
     def post_volumes_5678_action(self, body, **kw):
@@ -678,10 +694,8 @@ class FakeHTTPClient(base_client.HTTPClient):
 
     def put_os_quota_class_sets_test(self, body, **kw):
         assert list(body) == ['quota_class_set']
-        fakes.assert_has_keys(body['quota_class_set'],
-                              required=['class_name'])
+        fakes.assert_has_keys(body['quota_class_set'])
         return (200, {}, {'quota_class_set': {
-                          'class_name': 'test',
                           'volumes': 2,
                           'snapshots': 2,
                           'gigabytes': 1,
@@ -878,6 +892,12 @@ class FakeHTTPClient(base_client.HTTPClient):
         tenant_id = '0fa851f6668144cf9cd8c8419c1646c1'
         backup1 = '76a17945-3c6f-435c-975b-b5685db10b62'
         backup2 = 'd09534c6-08b8-4441-9e87-8976f3a8f699'
+        if kw.get('with_count', False):
+            return (200, {},
+                    {'backups': [
+                        _stub_backup_full(backup1, base_uri, tenant_id),
+                        _stub_backup_full(backup2, base_uri, tenant_id)],
+                    'count': 2})
         return (200, {},
                 {'backups': [
                     _stub_backup_full(backup1, base_uri, tenant_id),
@@ -1258,9 +1278,9 @@ class FakeHTTPClient(base_client.HTTPClient):
                 'storage_protocol': 'iSCSI',
                 'properties': {
                     'compression': {
-                        'title': 'Compression',
-                        'description': 'Enables compression.',
-                        'type': 'boolean'},
+                        u'title': u'Compression',
+                        u'description': u'Enables compression.',
+                        u'type': u'boolean'},
                 }
             }
         )

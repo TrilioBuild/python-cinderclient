@@ -14,6 +14,8 @@
 #    under the License.
 
 """Volume interface (v3 extension)."""
+import warnings
+
 from cinderclient import api_versions
 from cinderclient.apiclient import base as common_base
 from cinderclient import base
@@ -49,6 +51,22 @@ class Volume(volumes.Volume):
         """Revert a volume to a snapshot."""
         self.manager.revert_to_snapshot(self, snapshot)
 
+    def migrate_volume(self, host, force_host_copy, lock_volume, cluster=None):
+        """Migrate the volume to a new host."""
+        return self.manager.migrate_volume(self, host, force_host_copy,
+                                           lock_volume, cluster)
+
+    def manage(self, host, ref, name=None, description=None,
+               volume_type=None, availability_zone=None, metadata=None,
+               bootable=False, cluster=None):
+        """Manage an existing volume."""
+        return self.manager.manage(host=host, ref=ref, name=name,
+                                   description=description,
+                                   volume_type=volume_type,
+                                   availability_zone=availability_zone,
+                                   metadata=metadata, bootable=bootable,
+                                   cluster=cluster)
+
 
 class VolumeManager(volumes.VolumeManager):
     resource_class = Volume
@@ -59,7 +77,7 @@ class VolumeManager(volumes.VolumeManager):
                volume_type=None, user_id=None,
                project_id=None, availability_zone=None,
                metadata=None, imageRef=None, scheduler_hints=None,
-               source_replica=None, multiattach=False):
+               multiattach=False, backup_id=None):
         """Create a volume.
 
         :param size: Size of volume in GB
@@ -69,17 +87,17 @@ class VolumeManager(volumes.VolumeManager):
         :param name: Name of the volume
         :param description: Description of the volume
         :param volume_type: Type of volume
-        :param user_id: User id derived from context
-        :param project_id: Project id derived from context
+        :param user_id: User id derived from context (IGNORED)
+        :param project_id: Project id derived from context (IGNORED)
         :param availability_zone: Availability Zone to use
         :param metadata: Optional metadata to set on volume creation
         :param imageRef: reference to an image stored in glance
         :param source_volid: ID of source volume to clone from
-        :param source_replica: ID of source volume to clone replica
         :param scheduler_hints: (optional extension) arbitrary key-value pairs
                             specified by the client to help boot an instance
         :param multiattach: Allow the volume to be attached to more than
-                            one instance
+                            one instance (deprecated)
+        :param backup_id: ID of the backup
         :rtype: :class:`Volume`
         """
         if metadata is None:
@@ -87,22 +105,25 @@ class VolumeManager(volumes.VolumeManager):
         else:
             volume_metadata = metadata
 
+        if multiattach:
+            warnings.warn('The ``multiattach`` volume create flag is '
+                          'deprecated and will be removed in a future '
+                          'release. Multiattach capability is now controlled '
+                          'using volume type extra specs.',
+                          DeprecationWarning)
+
         body = {'volume': {'size': size,
                            'consistencygroup_id': consistencygroup_id,
                            'snapshot_id': snapshot_id,
                            'name': name,
                            'description': description,
                            'volume_type': volume_type,
-                           'user_id': user_id,
-                           'project_id': project_id,
                            'availability_zone': availability_zone,
-                           'status': "creating",
-                           'attach_status': "detached",
                            'metadata': volume_metadata,
                            'imageRef': imageRef,
                            'source_volid': source_volid,
-                           'source_replica': source_replica,
                            'multiattach': multiattach,
+                           'backup_id': backup_id
                            }}
 
         if group_id:
@@ -124,6 +145,7 @@ class VolumeManager(volumes.VolumeManager):
         return self._action('revert', volume,
                             info={'snapshot_id': base.getid(snapshot.id)})
 
+    @api_versions.wraps('3.12')
     def summary(self, all_tenants):
         """Get volumes summary."""
         url = "/volumes/summary"
@@ -194,11 +216,52 @@ class VolumeManager(volumes.VolumeManager):
                              'visibility': visibility,
                              'protected': protected})
 
-    @api_versions.wraps("3.8")
+    def migrate_volume(self, volume, host, force_host_copy, lock_volume,
+                       cluster=None):
+        """Migrate volume to new backend.
+
+        The new backend is defined by the host or the cluster (not both).
+
+        :param volume: The :class:`Volume` to migrate
+        :param host: The destination host
+        :param force_host_copy: Skip driver optimizations
+        :param lock_volume: Lock the volume and guarantee the migration
+                            to finish
+        :param cluster: The cluster
+        """
+        body = {'host': host, 'force_host_copy': force_host_copy,
+                'lock_volume': lock_volume}
+
+        if self.api_version.matches('3.16'):
+            if cluster:
+                body['cluster'] = cluster
+                del body['host']
+
+        return self._action('os-migrate_volume', volume, body)
+
+    def manage(self, host, ref, name=None, description=None,
+               volume_type=None, availability_zone=None, metadata=None,
+               bootable=False, cluster=None):
+        """Manage an existing volume."""
+        body = {'volume': {'host': host,
+                           'ref': ref,
+                           'name': name,
+                           'description': description,
+                           'volume_type': volume_type,
+                           'availability_zone': availability_zone,
+                           'metadata': metadata,
+                           'bootable': bootable
+                           }}
+        if self.api_version.matches('3.16') and cluster:
+            body['volume']['cluster'] = cluster
+        return self._create('/os-volume-manage', body, 'volume')
+
+    @api_versions.wraps('3.8')
     def list_manageable(self, host, detailed=True, marker=None, limit=None,
-                        offset=None, sort=None):
+                        offset=None, sort=None, cluster=None):
+        search_opts = {'cluster': cluster} if cluster else {'host': host}
         url = self._build_list_url("manageable_volumes", detailed=detailed,
-                                   search_opts={'host': host}, marker=marker,
+                                   search_opts=search_opts, marker=marker,
                                    limit=limit, offset=offset, sort=sort)
         return self._list(url, "manageable-volumes")
 

@@ -208,10 +208,11 @@ def do_show(cs, args):
 
 class CheckSizeArgForCreate(argparse.Action):
     def __call__(self, parser, args, values, option_string=None):
-        if ((args.snapshot_id or args.source_volid or args.source_replica)
+        if ((args.snapshot_id or args.source_volid)
                 is None and values is None):
-            parser.error('Size is a required parameter if snapshot '
-                         'or source volume is not specified.')
+            if not hasattr(args, 'backup_id') or args.backup_id is None:
+                parser.error('Size is a required parameter if snapshot '
+                             'or source volume or backup is not specified.')
         setattr(args, self.dest, values)
 
 
@@ -239,10 +240,6 @@ class CheckSizeArgForCreate(argparse.Action):
            help='Creates volume from volume ID. Default=None.')
 @utils.arg('--source_volid',
            help=argparse.SUPPRESS)
-@utils.arg('--source-replica',
-           metavar='<source-replica>',
-           default=None,
-           help='Creates volume from replicated volume ID. Default=None.')
 @utils.arg('--image-id',
            metavar='<image-id>',
            default=None,
@@ -297,7 +294,7 @@ class CheckSizeArgForCreate(argparse.Action):
 @utils.arg('--allow-multiattach',
            dest='multiattach',
            action="store_true",
-           help=('Allow volume to be attached more than once.'
+           help=('Allow volume to be attached more than once. (DEPRECATED)'
                  ' Default=False'),
            default=False)
 def do_create(cs, args):
@@ -342,7 +339,6 @@ def do_create(cs, args):
                                imageRef=image_ref,
                                metadata=volume_metadata,
                                scheduler_hints=hints,
-                               source_replica=args.source_replica,
                                multiattach=args.multiattach)
 
     info = dict()
@@ -1657,8 +1653,8 @@ def do_encryption_type_show(cs, args):
 @utils.arg('provider',
            metavar='<provider>',
            type=str,
-           help='The class that provides encryption support. '
-                'For example, LuksEncryptor.')
+           help='The encryption provider format. '
+                'For example, "luks" or "plain."')
 @utils.arg('--cipher',
            metavar='<cipher>',
            type=str,
@@ -1716,7 +1712,7 @@ def do_encryption_type_create(cs, args):
            type=str,
            required=False,
            default=argparse.SUPPRESS,
-           help="Class providing encryption support (e.g. LuksEncryptor)")
+           help="Encryption provider format (e.g. 'luks' or 'plain').")
 @utils.arg('--cipher',
            metavar='<cipher>',
            type=str,
@@ -2374,30 +2370,32 @@ def do_get_capabilities(cs, args):
 
     prop = infos.pop('properties', None)
     utils.print_dict(infos, "Volume stats")
-    utils.print_dict(prop, "Backend properties")
+    utils.print_dict(prop, "Backend properties",
+                     formatters=sorted(prop.keys()))
 
 
 @utils.arg('volume',
            metavar='<volume>',
-           help='Cinder volume already exists in volume backend')
+           help='Cinder volume that already exists in the volume backend.')
 @utils.arg('identifier',
            metavar='<identifier>',
-           help='Name or other Identifier for existing snapshot')
+           help='Name or other identifier for existing snapshot. This is '
+                'backend specific.')
 @utils.arg('--id-type',
            metavar='<id-type>',
            default='source-name',
            help='Type of backend device identifier provided, '
-                'typically source-name or source-id (Default=source-name)')
+                'typically source-name or source-id (Default=source-name).')
 @utils.arg('--name',
            metavar='<name>',
-           help='Snapshot name (Default=None)')
+           help='Snapshot name (Default=None).')
 @utils.arg('--description',
            metavar='<description>',
-           help='Snapshot description (Default=None)')
+           help='Snapshot description (Default=None).')
 @utils.arg('--metadata',
            nargs='*',
            metavar='<key=value>',
-           help='Metadata key=value pairs (Default=None)')
+           help='Metadata key=value pairs (Default=None).')
 def do_snapshot_manage(cs, args):
     """Manage an existing snapshot."""
     snapshot_metadata = None
@@ -2507,17 +2505,17 @@ def do_manageable_list(cs, args):
 @utils.arg('--marker',
            metavar='<marker>',
            default=None,
-           help='Begin returning volumes that appear later in the volume '
-                'list than that represented by this volume id. '
+           help='Begin returning snapshots that appear later in the snapshot '
+                'list than that represented by this snapshot id. '
                 'Default=None.')
 @utils.arg('--limit',
            metavar='<limit>',
            default=None,
-           help='Maximum number of volumes to return. Default=None.')
+           help='Maximum number of snapshots to return. Default=None.')
 @utils.arg('--offset',
            metavar='<offset>',
            default=None,
-           help='Number of volumes to skip after marker. Default=None.')
+           help='Number of snapshots to skip after marker. Default=None.')
 @utils.arg('--sort',
            metavar='<key>[:<direction>]',
            default=None,
